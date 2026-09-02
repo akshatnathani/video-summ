@@ -1,0 +1,356 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Summarize — a paper journal for video. Built on the same design language as Verve
+ * (paper stock and ink, monospace throughout, serif for display type, hairline rules
+ * instead of rounded shadows) but re-laid out for a single job: queue → download →
+ * transcription → summary. A warm amber stands in for Verve's pure-ink accents.
+ */
+
+:root {
+  /* paper */
+  --paper: #faf8f2;
+  --paper-sunk: #f0ece1;
+  --paper-raised: #fffdf6;
+  /* ink */
+  --ink: #1c1a15;
+  --ink-soft: #5a5543;
+  --ink-faint: #948d7b;
+  --rule: #1c1a15;
+  --rule-soft: #ddd6c4;
+  /* accent — burnt amber, readable on paper */
+  --brand: #9a5b0f;
+  --brand-soft: #e8dcc3;
+  /* verdict-ish status colours */
+  --good: #1f6f43;
+  --bad: #a52f22;
+  --warn: #8a6a12;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --paper: #131210;
+  --paper-sunk: #1b1916;
+  --paper-raised: #201d19;
+  --ink: #f1ede3;
+  --ink-soft: #b8b1a0;
+  --ink-faint: #7b7566;
+  --rule: #f1ede3;
+  --rule-soft: #37332b;
+  --brand: #e0a458;
+  --brand-soft: #42351f;
+  --good: #7bd6a8;
+  --bad: #f0907f;
+  --warn: #e2bd5c;
+
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* ── type ────────────────────────────────────────────────────────────────── */
+
+.display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.06;
+}
+
+.label {
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.prose-mono p {
+  margin-bottom: 0.85em;
+}
+.prose-mono h1 {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 400;
+  margin: 0 0 0.6em;
+}
+.prose-mono h2 {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 400;
+  margin: 1.4em 0 0.5em;
+}
+.prose-mono h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 1.2em 0 0.3em;
+}
+.prose-mono ul {
+  list-style: none;
+  margin-bottom: 0.85em;
+}
+.prose-mono ol {
+  list-style: none;
+  margin-bottom: 0.85em;
+}
+.prose-mono li {
+  padding-left: 1.1em;
+  position: relative;
+}
+.prose-mono li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--ink-faint);
+}
+.prose-mono strong {
+  font-weight: 700;
+}
+.prose-mono em {
+  font-style: italic;
+}
+.prose-mono code {
+  background: var(--paper-sunk);
+  padding: 0 3px;
+  font-size: 0.92em;
+}
+.prose-mono a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  color: var(--brand);
+}
+.prose-mono blockquote {
+  border-left: 1.5px solid var(--rule-soft);
+  padding-left: 0.9em;
+  margin-bottom: 0.85em;
+  color: var(--ink-soft);
+}
+
+/* ── the box: one container primitive ────────────────────────────────────── */
+
+.box {
+  border: 1px solid var(--rule-soft);
+  background: var(--paper-raised);
+}
+
+/* Emphasis is a heavier rule and a hard offset, never a blur. */
+.box-strong {
+  border: 1.5px solid var(--rule);
+  background: var(--paper-raised);
+  box-shadow: 4px 4px 0 var(--rule);
+}
+
+.box-hover {
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+.box-hover:hover:not(:disabled) {
+  border-color: var(--rule);
+  box-shadow: 3px 3px 0 var(--rule);
+  transform: translate(-1px, -1px);
+}
+
+.rule {
+  border-color: var(--rule-soft);
+}
+
+/* ── the timeline rail (pipeline, key points) ────────────────────────────── */
+
+.rail {
+  position: relative;
+  padding-left: 20px;
+}
+.rail::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--rule-soft);
+}
+.rail-node::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 8px;
+  width: 7px;
+  height: 7px;
+  background: var(--paper);
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 50%;
+}
+.rail-node[data-state="active"]::before {
+  border-color: var(--brand);
+  background: var(--brand);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+.rail-node[data-state="done"]::before {
+  border-color: var(--rule);
+  background: var(--rule);
+}
+.rail-node[data-state="failed"]::before {
+  border-color: var(--bad);
+  background: var(--bad);
+}
+.rail-node[data-state="brand"]::before {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ── controls ────────────────────────────────────────────────────────────── */
+
+.btn {
+  border: 1px solid var(--rule);
+  background: var(--paper-raised);
+  color: var(--ink);
+  padding: 5px 12px;
+  font-size: 11.5px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.btn:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--paper);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--paper-raised);
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+.field {
+  border: 1px solid var(--rule-soft);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 7px 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  width: 100%;
+}
+.field::placeholder {
+  color: var(--ink-faint);
+}
+.field:focus {
+  outline: none;
+  border-color: var(--rule);
+}
+
+.check {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--rule-soft);
+  background: var(--paper);
+  position: relative;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.check:checked {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+.check:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border: solid var(--paper);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.nav-link {
+  position: relative;
+  padding-bottom: 2px;
+  color: var(--ink-soft);
+  border-bottom: 1px solid transparent;
+}
+.nav-link:hover {
+  color: var(--ink);
+  border-bottom-color: var(--rule-soft);
+}
+.nav-link[data-active="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--rule);
+}
+
+/* ── scrollbars ──────────────────────────────────────────────────────────── */
+
+.scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-soft) transparent;
+}
+.scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--rule-soft);
+}
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
+}
+
+/* ── motion ──────────────────────────────────────────────────────────────── */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise {
+  animation: rise 0.28s ease-out both;
+}
+
+.balance {
+  text-wrap: balance;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
