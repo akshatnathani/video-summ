@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # ============================================================
-#  Video Summarizer — EC2 Production Deploy Script
-#  Run this ON the EC2 instance after cloning your repo.
+#  Video Summarizer — Production Deploy Script
+#  Run this ON the EC2 / Compute Engine instance.
 # ============================================================
 
 RED='\033[0;31m'
@@ -20,10 +20,8 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 # ----------------------------------------------------------
 command -v docker >/dev/null 2>&1 || error "Docker not installed. Run: sudo apt install -y docker.io docker-compose-v2"
 
-# Ensure docker daemon is running
 sudo systemctl is-active --quiet docker || sudo systemctl start docker
 
-# Ensure the current user can run docker without sudo
 if ! groups "$USER" | grep -q docker; then
   warn "Adding $USER to docker group..."
   sudo usermod -aG docker "$USER"
@@ -40,7 +38,6 @@ if [ ! -f .env ]; then
   read -rp "Press Enter after editing .env to continue..."
 fi
 
-# Source .env for use in this script
 set -a
 source .env
 set +a
@@ -52,11 +49,11 @@ fi
 info "GOOGLE_API_KEY is set."
 
 # ----------------------------------------------------------
-# 2. Create cookie.txt if missing (yt-dlp cookies)
+# 2. Cookie file for yt-dlp
 # ----------------------------------------------------------
 if [ ! -f cookies.txt ]; then
   touch cookies.txt
-  warn "Created empty cookies.txt — populate it with browser cookies if YouTube blocks downloads."
+  warn "Created empty cookies.txt — populate with browser cookies if YouTube blocks downloads."
 fi
 
 # ----------------------------------------------------------
@@ -68,10 +65,9 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 # ----------------------------------------------------------
 # 4. Wait for health checks
 # ----------------------------------------------------------
-info "Waiting for services to become healthy (this may take a minute)..."
+info "Waiting for services to become healthy..."
 for i in $(seq 1 30); do
-  if docker compose ps --format json 2>/dev/null | grep -q '"Health":"healthy"' || \
-     docker compose ps 2>/dev/null | grep -q "(healthy)"; then
+  if docker compose ps 2>/dev/null | grep -q "(healthy)"; then
     break
   fi
   sleep 2
@@ -84,7 +80,9 @@ docker compose ps
 # ----------------------------------------------------------
 # 5. Print summary
 # ----------------------------------------------------------
-PUBLIC_IP=$(curl -s http://checkip.amazonaws.com 2>/dev/null || echo "<your-ec2-ip>")
+PUBLIC_IP=$(curl -s http://checkip.amazonaws.com 2>/dev/null || \
+            curl -s http://checkip.google-gcloud.com 2>/dev/null || \
+            echo "<your-server-ip>")
 
 echo ""
 echo "============================================="
@@ -100,14 +98,15 @@ echo "  To restart:      docker compose restart"
 echo ""
 
 # ----------------------------------------------------------
-# 6. SSL setup (optional)
+# 6. SSL setup instructions
 # ----------------------------------------------------------
 if [ -n "${DOMAIN:-}" ]; then
   echo ""
   warn "DOMAIN is set to '${DOMAIN}'. To enable HTTPS:"
   echo ""
   echo "  1. Point your domain's DNS A record to ${PUBLIC_IP}"
-  echo "  2. Run:  ./deploy.sh ssl"
+  echo "  2. Wait for DNS propagation (use: dig ${DOMAIN})"
+  echo "  3. Run:  ./deploy.sh ssl"
   echo ""
 fi
 
@@ -121,60 +120,127 @@ if [ "${1:-}" = "ssl" ]; then
 
   info "Requesting SSL certificate for ${DOMAIN}..."
 
-  # Get initial certificate
   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm certbot \
     certonly --webroot --webroot-path=/var/www/certbot \
     --email "admin@${DOMAIN}" --agree-tos --no-eff-email \
     -d "${DOMAIN}"
 
-  # Switch nginx to HTTPS config
   info "Switching nginx to HTTPS mode..."
 
-  cat > frontend/nginx.prod.conf << 'SSLCONF'
+  cat > frontend/nginx.prod.conf << SSLCONF
+upstream gateway {
+    server gateway:8000;
+    keepalive 32;
+}
+
+limit_req_zone \$binary_remote_addr zone=api_limit:10m rate=10r/s;
+limit_req_zone \$binary_remote_addr zone=general:10m rate=30r/s;
+limit_conn_zone \$binary_remote_addr zone=conn_limit:10m;
+
+# HTTP -> HTTPS redirect
 server {
     listen 80;
     server_name _;
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
-    location / { return 301 https://$host$request_uri; }
+    location / { return 301 https://\$host\$request_uri; }
 }
 
 server {
     listen 443 ssl http2;
     server_name _;
 
-    ssl_certificate /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:;" always;
+
+    limit_conn conn_limit 50;
+    client_max_body_size 500M;
+    client_body_timeout 60s;
+    client_header_timeout 60s;
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_min_length 256;
+    gzip_types text/plain text/css text/javascript application/javascript application/json application/xml image/svg+xml;
 
     root /usr/share/nginx/html;
     index index.html;
 
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2|woff|ttf|eot|map)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    location /health {
+        access_log off;
+        return 200 'ok';
+        add_header Content-Type text/plain;
+    }
+
     location /api/ {
-        proxy_pass http://gateway:8000/api/;
+        limit_req zone=api_limit burst=20 nodelay;
+        proxy_pass http://gateway/api/;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 1h;
+        proxy_send_timeout 60s;
+        proxy_connect_timeout 10s;
     }
 
     location / {
-        try_files $uri /index.html;
+        try_files \$uri \$uri/ /index.html;
+        location ~* \.html\$ {
+            expires -1;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
     }
+
+    location ~ /\. { deny all; access_log off; log_not_found off; }
+    location ~* /(wp-admin|wp-login|phpmyadmin|\.env|\.git) { return 444; }
+
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log warn;
 }
 SSLCONF
-
-  sed -i "s/DOMAIN_PLACEHOLDER/${DOMAIN}/g" frontend/nginx.prod.conf
 
   # Restart nginx to pick up SSL config
   docker compose -f docker-compose.yml -f docker-compose.prod.yml restart frontend
 
   info "SSL certificate installed! https://${DOMAIN} should now work."
   echo ""
-  echo "  Auto-renewal is configured via the certbot container."
-  echo "  To manually renew: docker compose run --rm certbot renew"
+  echo "  Auto-renewal runs every 12 hours via certbot container."
+  echo "  Manual renew: docker compose run --rm certbot renew"
+fi
+
+# ----------------------------------------------------------
+# 8. Show firewall status
+# ----------------------------------------------------------
+if command -v ufw >/dev/null 2>&1; then
+  echo ""
+  info "=== Firewall Status ==="
+  ufw status numbered 2>/dev/null || true
 fi

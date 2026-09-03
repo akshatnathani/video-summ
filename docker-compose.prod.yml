@@ -38,7 +38,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATA_DIR: /data
       INGEST_URL: http://ingest:8001
-      CORS_ORIGINS: http://localhost,http://localhost:80,${DOMAIN:-}
+      CORS_ORIGINS: http://localhost,http://localhost:80,https://${DOMAIN:-},http://${DOMAIN:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       LLM_MODEL: ${LLM_MODEL:-gemini-2.5-flash}
     depends_on:
